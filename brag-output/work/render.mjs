@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = path.dirname(new URL(import.meta.url).pathname);
-const types = { '.html': 'text/html', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2' };
+const types = { '.html': 'text/html', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2', '.js': 'text/javascript' };
 const server = http.createServer((req, res) => {
   const p = path.join(root, decodeURIComponent(req.url.split('?')[0]));
   fs.readFile(p, (e, b) => { if (e) { res.writeHead(404); res.end(); return; } res.writeHead(200, { 'content-type': types[path.extname(p)] || 'application/octet-stream' }); res.end(b); });

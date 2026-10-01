@@ -21,3 +21,13 @@ Asset reali: fulmine cromato originale (raster, alpha) + "ROMA TRIZONE CLUB" in 
 | 2.35–2.9 | linea elettrica sotto, la scritta sale da dietro la linea, thump |
 | 3.35–4.1 | riflesso cromato |
 | 4.1–5.0 | hold |
+
+---
+# Round 2 · stile reference (motion minimale geometrico)
+Dalle reference: forme primitive che rimbalzano e si trasformano nel simbolo, pezzi che si incastrano, inversione nero/bianco, flip, wordmark lettera per lettera, easing secco. SFX minimali (pop intonati in La, tick, whoosh, vetro).
+
+## V3 · Morph (sfondo nero)
+0.07 pop del punto → 0.35–0.62 cade → 0.62 schiacciamento sul "pavimento" → 0.72–1.15 rimbalza e cresce in cerchio → 1.15–1.6 morph nel fulmine piatto → 1.6 lock (thump) → 1.75–2.2 wipe diagonale bianco→cromo → 2.25–2.8 sale in posizione → 2.55 lettere che salgono una a una → 3.85 riflesso → hold.
+
+## V4 · Tri (nero → bianco)
+3 facce del fulmine entrano da 3 direzioni e si incastrano (0.34 / 0.64 / 0.94, pop La–Do#–Mi) → al 3° incastro lo sfondo si inverte in bianco → 1.25–1.75 flip che rivela il cromo → 1.95–2.75 barra nera che entra ed esce scoprendo la scritta → chiude identico al logo originale.

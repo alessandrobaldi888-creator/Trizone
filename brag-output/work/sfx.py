@@ -234,5 +234,68 @@ def v2(out):
     m.render(out)
 
 
+def pop(f=880, sec=0.25):
+    n = int(sec * SR); t = np.arange(n) / SR
+    fr = f * (1 + 1.2 * np.exp(-t / 0.012))
+    x = np.sin(2 * np.pi * np.cumsum(fr) / SR) * env(n, 0.001, 0.06)
+    return x + hp(noise(sec), 3000) * env(n, 0.0005, 0.004) * 0.3
+
+
+def tick(sec=0.03):
+    n = int(sec * SR)
+    return bp(noise(sec), 2500, 8000) * env(n, 0.0005, 0.005)
+
+
+def whoosh(sec, lo=300, hi=5000, rise=True):
+    n = int(sec * SR)
+    e = np.sin(np.linspace(0, np.pi, n)) ** 1.5
+    return sweep(sec, lo, hi, rise, 8) * e
+
+
+# ---------------- V3 · MORPH ----------------
+def v3(out):
+    m = Mix()
+    m.add(pop(880), 0.07, 0.45, 0, 0.3)
+    m.add(whoosh(0.3, 300, 2500, False), 0.34, 0.10, 0, 0.2)
+    m.add(boom(0.4, 110, 55, 0.25), 0.62, 0.45, 0, 0.2)
+    m.add(tick(), 0.62, 0.25, 0, 0.2)
+    m.add(whoosh(0.45, 300, 6000), 0.72, 0.18, 0, 0.3)
+    m.add(pop(440, 0.3), 1.12, 0.25, 0, 0.3)
+    m.add(whoosh(0.45, 500, 4000), 1.15, 0.16, 0, 0.3)
+    m.add(boom(0.6, 130, 55, 0.4), 1.6, 0.75, 0, 0.25)
+    m.add(pop(220, 0.3), 1.6, 0.30, 0, 0.3)
+    m.add(tick(0.04), 1.6, 0.35, 0, 0.3)
+    m.add(whoosh(0.5, 2500, 11000), 1.72, 0.07, 0, 0.5)
+    m.add(shimmer(1.4, 3), 1.9, 0.06, 0.15, 0.7)
+    m.add(whoosh(0.55, 200, 2500), 2.25, 0.10, 0, 0.3)
+    for i in range(17):
+        if "ROMA TRIZONE CLUB"[i] != " ":
+            m.add(tick(0.02), 2.58 + i * 0.032, 0.07, (i - 8) / 10, 0.3)
+    m.add(whoosh(0.6, 2500, 11000), 3.85, 0.05, 0, 0.5)
+    m.add(shimmer(1.2, 4), 4.05, 0.018, -0.15, 0.7)
+    m.render(out)
+
+
+# ---------------- V4 · TRI ----------------
+def v4(out):
+    m = Mix()
+    snaps = [(0.34, 440, -0.5), (0.64, 554.4, 0.5), (0.94, 659.3, -0.2)]   # A - C# - E
+    for k, (ts, f, pan) in enumerate(snaps):
+        m.add(whoosh(0.22, 400, 5000), ts - 0.22, 0.14, pan, 0.25)
+        m.add(pop(f, 0.35), ts, 0.30, pan * 0.5, 0.35)
+        m.add(tick(0.04), ts, 0.35, pan * 0.5, 0.2)
+        m.add(boom(0.5, 120, 55, 0.3 + 0.2 * (k == 2)), ts, 0.45 + 0.4 * (k == 2), 0, 0.2)
+    m.add(whoosh(0.5, 300, 6000), 1.25, 0.16, 0, 0.35)
+    m.add(tick(0.04), 1.5, 0.2, 0, 0.3)
+    m.add(shimmer(1.4, 5), 1.5, 0.06, 0.1, 0.7)
+    m.add(whoosh(0.35, 400, 5000), 1.95, 0.12, -0.5, 0.25)
+    m.add(tick(0.03), 2.3, 0.15, 0.5, 0.2)
+    m.add(whoosh(0.4, 400, 5000, False), 2.35, 0.12, 0.3, 0.25)
+    m.add(pop(880, 0.3), 2.75, 0.12, 0.5, 0.4)
+    m.add(whoosh(0.6, 2500, 11000), 3.6, 0.05, 0, 0.5)
+    m.add(shimmer(1.2, 6), 3.8, 0.018, -0.15, 0.7)
+    m.render(out)
+
+
 if __name__ == "__main__":
-    {"v1": v1, "v2": v2}[sys.argv[1]](sys.argv[2])
+    {"v1": v1, "v2": v2, "v3": v3, "v4": v4}[sys.argv[1]](sys.argv[2])
