@@ -1,0 +1,7 @@
+work/frames_*/
+work/seq_*/
+work/stills/
+work/node_modules
+work/*.log
+work/render.done
+work/__pycache__/

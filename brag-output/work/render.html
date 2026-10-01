@@ -1,0 +1,330 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: "Montserrat"; src: url("fonts/montserrat.woff2") format("woff2"); font-weight: 100 900; }
+  html, body { margin: 0; background: #000; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script>
+const W = 1080, H = 1920;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const layer = new OffscreenCanvas(W, H), lctx = layer.getContext('2d');
+const glowC = new OffscreenCanvas(W, H), gctx = glowC.getContext('2d');
+
+// ---------- layout (faithful to the original lockup proportions) ----------
+const S = 1.25;                 // scale vs the 1x source crop
+let BOLT, BJ;                   // image + json
+const CX = 540, GROUP_CY = 920;
+let bx, by, bw, bh;             // bolt image placement on screen
+let poly = [], per = [], perLen = 0;
+const TEXT = "ROMA TRIZONE CLUB";
+let letters = [];               // {ch, x, w}
+let textY, textCap, fontPx;
+
+const ELEC = "160,215,255";     // electric blue-white
+const rnd = (seed) => { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; };
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lin = (t, a, b) => clamp((t - a) / (b - a));
+const eOutExpo = x => x >= 1 ? 1 : 1 - Math.pow(2, -10 * x);
+const eOutCubic = x => 1 - Math.pow(1 - x, 3);
+const eInOut = x => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+
+async function setup() {
+  BOLT = new Image(); BOLT.src = "bolt.png"; await BOLT.decode();
+  BJ = await (await fetch("bolt.json")).json();
+  await document.fonts.load('700 80px "Montserrat"');
+  bw = BJ.w * S; bh = BJ.h * S;
+  // source bolt visible area: crop-y 10..468 ; text cap 905..949 (source) ; crop origin 425,390
+  const boltVisTop = 10 * S, boltVisH = 458 * S, gap = 47 * S; textCap = 44 * S;
+  const groupH = boltVisH + gap + textCap;
+  by = GROUP_CY - groupH / 2 - boltVisTop;
+  bx = CX - bw / 2 + (538.5 - (425 + BJ.w / 2)) * S;
+  textY = by + boltVisTop + boltVisH + gap + textCap; // baseline
+  poly = BJ.poly.map(([x, y]) => [bx + x * S, by + y * S]);
+  // perimeter table
+  per = [0];
+  for (let i = 1; i < poly.length; i++) per.push(per[i - 1] + Math.hypot(poly[i][0] - poly[i - 1][0], poly[i][1] - poly[i - 1][1]));
+  perLen = per[per.length - 1];
+  // text: Montserrat Bold, sized to the original's cap height and width
+  fontPx = Math.round(textCap / 0.70);
+  ctx.font = `700 ${fontPx}px Montserrat`;
+  const targetW = 701 * S;
+  const adv = [...TEXT].map(ch => ctx.measureText(ch).width);
+  const raw = adv.reduce((a, b) => a + b, 0);
+  const sp = (targetW - raw) / (TEXT.length - 1);
+  let x = CX - targetW / 2;
+  letters = [...TEXT].map((ch, i) => { const o = { ch, x, w: adv[i] }; x += adv[i] + sp; return o; });
+  // glow silhouette
+  gctx.clearRect(0, 0, W, H);
+  gctx.drawImage(BOLT, bx, by, bw, bh);
+  gctx.globalCompositeOperation = "source-in";
+  gctx.fillStyle = `rgb(${ELEC})`; gctx.fillRect(0, 0, W, H);
+  gctx.globalCompositeOperation = "source-over";
+  return true;
+}
+
+function perimPoint(u) {
+  u = ((u % 1) + 1) % 1; const d = u * perLen;
+  let i = 1; while (i < per.length - 1 && per[i] < d) i++;
+  const f = (d - per[i - 1]) / (per[i] - per[i - 1] || 1);
+  return [poly[i - 1][0] + (poly[i][0] - poly[i - 1][0]) * f, poly[i - 1][1] + (poly[i][1] - poly[i - 1][1]) * f];
+}
+
+// ---------- electricity ----------
+function jag(x1, y1, x2, y2, r, disp, depth) {
+  let pts = [[x1, y1], [x2, y2]];
+  for (let k = 0; k < depth; k++) {
+    const n = [pts[0]];
+    for (let i = 1; i < pts.length; i++) {
+      const [ax, ay] = pts[i - 1], [cx, cy] = pts[i];
+      const dx = cx - ax, dy = cy - ay, L = Math.hypot(dx, dy) || 1;
+      const off = (r() - .5) * disp;
+      n.push([(ax + cx) / 2 - dy / L * off, (ay + cy) / 2 + dx / L * off], [cx, cy]);
+    }
+    pts = n; disp *= 0.55;
+  }
+  return pts;
+}
+function strokePts(c, pts, intensity, width = 1) {
+  c.save(); c.globalCompositeOperation = "lighter"; c.lineCap = "round"; c.lineJoin = "round";
+  const passes = [[26, .05], [12, .12], [5, .35], [2.2, .9]];
+  for (const [w, a] of passes) {
+    c.strokeStyle = `rgba(${ELEC},${a * intensity})`; c.lineWidth = w * width;
+    c.beginPath(); pts.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.stroke();
+  }
+  c.strokeStyle = `rgba(255,255,255,${intensity})`; c.lineWidth = 1.1 * width;
+  c.beginPath(); pts.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.stroke();
+  c.restore();
+}
+function lightning(c, x1, y1, x2, y2, seed, intensity, width = 1) {
+  const r = rnd(seed);
+  const main = jag(x1, y1, x2, y2, r, Math.hypot(x2 - x1, y2 - y1) * 0.28, 7);
+  strokePts(c, main, intensity, width * 1.6);
+  for (let b = 0; b < 5; b++) {
+    const i = 8 + Math.floor(r() * (main.length * 0.7));
+    const [sx, sy] = main[Math.min(i, main.length - 1)];
+    const ang = Math.PI / 2 + (r() - .5) * 1.8, len = 80 + r() * 260;
+    strokePts(c, jag(sx, sy, sx + Math.cos(ang) * len * (r() < .5 ? -1 : 1), sy + Math.sin(ang) * len, r, len * .4, 5), intensity * .6, width * .7);
+  }
+}
+// crawling arcs on the bolt outline
+function edgeArcs(c, t, density, intensity, seedBase) {
+  const fr = Math.floor(t * 30), r = rnd(seedBase + fr * 7919);
+  for (let k = 0; k < density; k++) {
+    const u = r(), du = 0.02 + r() * 0.05;
+    const pts = []; const steps = 7;
+    for (let s = 0; s <= steps; s++) { const [x, y] = perimPoint(u + du * s / steps); pts.push([x + (r() - .5) * 14, y + (r() - .5) * 14]); }
+    strokePts(c, pts, intensity * (0.4 + r() * 0.6), 0.6);
+  }
+}
+
+// ---------- scene pieces ----------
+function background(t, flash) {
+  const g = ctx.createRadialGradient(CX, GROUP_CY, 50, CX, GROUP_CY, 1250);
+  g.addColorStop(0, "#0d1219"); g.addColorStop(.55, "#05070a"); g.addColorStop(1, "#010102");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  if (flash > 0) { ctx.fillStyle = `rgba(225,240,255,${flash})`; ctx.fillRect(0, 0, W, H); }
+}
+function boltGlow(a, blur = 40) {
+  if (a <= 0) return;
+  ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = a; ctx.filter = `blur(${blur}px)`;
+  ctx.drawImage(glowC, 0, 0); ctx.filter = `blur(${blur * 2.6}px)`; ctx.drawImage(glowC, 0, 0); ctx.restore();
+}
+function drawText(c, alphaFor) {
+  c.font = `700 ${fontPx}px Montserrat`; c.textBaseline = "alphabetic";
+  letters.forEach((L, i) => {
+    const a = alphaFor(i); if (a <= 0) return;
+    c.fillStyle = `rgba(244,246,250,${a})`; c.fillText(L.ch, L.x, textY);
+  });
+}
+// chrome highlight sweep across everything drawn on the layer
+function shine(c, p) {
+  if (p <= 0 || p >= 1) return;
+  const x = -500 + p * 2100;
+  c.save(); c.globalCompositeOperation = "source-atop";
+  c.translate(x, GROUP_CY); c.rotate(-0.42);
+  const g = c.createLinearGradient(-170, 0, 170, 0);
+  g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(.45, "rgba(255,255,255,.55)");
+  g.addColorStop(.5, "rgba(255,255,255,.95)"); g.addColorStop(.55, "rgba(255,255,255,.55)"); g.addColorStop(1, "rgba(255,255,255,0)");
+  c.fillStyle = g; c.fillRect(-170, -1400, 340, 2800); c.restore();
+}
+function sparks(c, t, t0, x0, y0, n, seed, spread = 1) {
+  const dt = t - t0; if (dt < 0 || dt > 1.4) return;
+  const r = rnd(seed);
+  c.save(); c.globalCompositeOperation = "lighter"; c.lineCap = "round";
+  for (let i = 0; i < n; i++) {
+    const ang = r() * Math.PI * 2, sp = (300 + r() * 1100) * spread, life = 0.35 + r() * 0.8;
+    if (dt > life) { r(); continue; }
+    const vx = Math.cos(ang) * sp, vy = Math.sin(ang) * sp - 200, drag = 2.6, gr = 1400;
+    const k = (1 - Math.exp(-drag * dt)) / drag;
+    const x = x0 + vx * k, y = y0 + vy * k + 0.5 * gr * dt * dt * 0.6;
+    const k2 = (1 - Math.exp(-drag * Math.max(0, dt - 0.03))) / drag, d2 = Math.max(0, dt - .03);
+    const px = x0 + vx * k2, py = y0 + vy * k2 + 0.5 * gr * d2 * d2 * 0.6;
+    const a = (1 - dt / life) * (0.6 + r() * 0.4);
+    c.strokeStyle = `rgba(255,${200 + (i % 4) * 14},${150 + (i % 5) * 20},${a})`; c.lineWidth = 2.2;
+    c.beginPath(); c.moveTo(px, py); c.lineTo(x, y); c.stroke();
+  }
+  c.restore();
+}
+function shake(t, t0, amp, dur, seed) {
+  const d = t - t0; if (d < 0 || d > dur) return [0, 0];
+  const r = rnd(seed + Math.floor(t * 60)); const k = amp * Math.pow(1 - d / dur, 2);
+  return [(r() - .5) * 2 * k, (r() - .5) * 2 * k];
+}
+function camera(t, dur, sx, sy) {
+  const z = 1 + 0.035 * eInOut(clamp(t / dur));
+  ctx.translate(CX + sx, GROUP_CY + sy); ctx.scale(z, z); ctx.translate(-CX, -GROUP_CY);
+}
+function vignette() {
+  const g = ctx.createRadialGradient(CX, H / 2, 400, CX, H / 2, 1300);
+  g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,.55)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+
+// ---------- V1 · STRIKE ----------
+const V1 = { dur: 5.0, strike: 0.9 };
+function v1(t) {
+  const T = V1.strike;
+  // pre-strike sky flickers (distant, top of frame)
+  const pre = [[0.12, .05], [0.3, .09], [0.62, .14]];
+  let flash = 0; for (const [ft, a] of pre) { const d = t - ft; if (d >= 0 && d < .12) flash = Math.max(flash, a * (1 - d / .12) * (Math.floor(d * 60) % 2 ? .5 : 1)); }
+  const d = t - T;
+  if (d >= 0) flash = Math.max(flash, d < .07 ? .95 : .95 * Math.exp(-(d - .07) * 9));
+  background(t, 0);
+  ctx.save();
+  const [sx, sy] = shake(t, T, 26, .55, 11);
+  camera(t, V1.dur, sx, sy);
+  // distant pre-strike arcs high in the sky
+  if (t > 0.3 && t < 0.42) lightning(ctx, 300, -50, 200, 420, 77, .35 * (1 - (t - .3) / .12), .5);
+  if (t > 0.62 && t < 0.72) lightning(ctx, 860, -50, 960, 520, 91, .45 * (1 - (t - .62) / .1), .55);
+  // main strike: from the top of frame into the bolt
+  if (d >= -0.06 && d < .26) {
+    const grow = clamp((d + .06) / .06);
+    const endY = -60 + (by + 200 * S + 60) * grow;
+    const inten = d < .1 ? 1 : 1 - (d - .1) / .16;
+    lightning(ctx, CX + 40, -60, CX - 10, endY, 1234 + (d > .12 ? 1 : 0), inten, 1.4);
+  }
+  // logo
+  const on = d >= 0;
+  if (on) {
+    boltGlow(.9 * Math.exp(-d * 2.2) + .12, 40);
+    lctx.clearRect(0, 0, W, H);
+    lctx.drawImage(BOLT, bx, by, bw, bh);
+    // overexposed then settles into chrome
+    const over = Math.exp(-d * 5);
+    if (over > .01) { lctx.save(); lctx.globalCompositeOperation = "source-atop"; lctx.fillStyle = `rgba(220,240,255,${over * .9})`; lctx.fillRect(0, 0, W, H); lctx.restore(); }
+    // text: electric flicker-on, letter by letter
+    const tt0 = 2.0;
+    drawText(lctx, i => {
+      const r = rnd(500 + i), on0 = tt0 + r() * 0.55, dd = t - on0;
+      if (dd < 0) return 0; if (dd > .28) return 1;
+      const fr = Math.floor(t * 30); return rnd(fr * 31 + i)() < 0.55 ? 1 : 0.15;
+    });
+    shine(lctx, lin(t, 3.25, 4.0));
+    ctx.drawImage(layer, 0, 0);
+    // residual arcs crawling on the edges
+    const arcAmt = Math.exp(-d * 1.6);
+    if (arcAmt > .05) edgeArcs(ctx, t, Math.round(6 * arcAmt) + 1, arcAmt, 42);
+    if (t > 4.35 && t < 4.47) edgeArcs(ctx, t, 2, .7, 99);
+    // electric underglow while letters ignite
+    const tg = Math.exp(-Math.pow((t - 2.35) / .35, 2)) * .5;
+    if (tg > .02) { ctx.save(); ctx.globalCompositeOperation = "lighter"; ctx.filter = "blur(18px)"; ctx.globalAlpha = tg; ctx.fillStyle = `rgb(${ELEC})`; ctx.font = `700 ${fontPx}px Montserrat`; letters.forEach(L => ctx.fillText(L.ch, L.x, textY)); ctx.restore(); }
+    sparks(ctx, t, T, CX - 10, by + 200 * S, 70, 7, 1);
+  }
+  ctx.restore();
+  vignette();
+  if (flash > 0) { ctx.fillStyle = `rgba(225,240,255,${flash})`; ctx.fillRect(0, 0, W, H); }
+}
+
+// ---------- V2 · CHARGE ----------
+const V2 = { dur: 5.0, boom: 1.85 };
+function v2(t) {
+  const B = V2.boom, d = t - B;
+  background(t, 0);
+  ctx.save();
+  const preShake = t > 1.4 && t < B ? (t - 1.4) / (B - 1.4) * 5 : 0;
+  const [s1x, s1y] = shake(t, 0, preShake, 9, 3);
+  const [s2x, s2y] = shake(t, B, 30, .6, 5);
+  camera(t, V2.dur, s1x + s2x, s1y + s2y);
+  const uTop = 0.47; // start near the top edge, two heads run down both sides to the tip
+  const trace = eInOut(lin(t, 0.15, 1.65));
+  if (d < 0) {
+    // ambient charge glow
+    boltGlow(.05 + .35 * trace * trace, 46);
+    if (t > 0.15) {
+      const fr = Math.floor(t * 30), r = rnd(fr * 13 + 1);
+      for (const dir of [1, -1]) {
+        const span = trace * 0.53, steps = Math.max(2, Math.round(span * 120));
+        const pts = [];
+        for (let s = 0; s <= steps; s++) { const [x, y] = perimPoint(uTop + dir * span * s / steps); pts.push([x + (r() - .5) * 9, y + (r() - .5) * 9]); }
+        strokePts(ctx, pts, 0.55 + 0.45 * r(), 0.75);
+        // bright head
+        const [hx, hy] = perimPoint(uTop + dir * span);
+        ctx.save(); ctx.globalCompositeOperation = "lighter";
+        const hg = ctx.createRadialGradient(hx, hy, 0, hx, hy, 60);
+        hg.addColorStop(0, "rgba(255,255,255,.95)"); hg.addColorStop(.25, `rgba(${ELEC},.5)`); hg.addColorStop(1, `rgba(${ELEC},0)`);
+        ctx.fillStyle = hg; ctx.fillRect(hx - 60, hy - 60, 120, 120); ctx.restore();
+        for (let k = 0; k < 2; k++) { const a = r() * 6.28, L = 30 + r() * 70; strokePts(ctx, jag(hx, hy, hx + Math.cos(a) * L, hy + Math.sin(a) * L, r, L * .5, 4), .6, .5); }
+      }
+      if (t > 1.62) edgeArcs(ctx, t, 10, 1, 7);
+      // tiny spark at the very start
+      if (t < 0.4) sparks(ctx, t, 0.15, ...perimPoint(uTop), 14, 3, .35);
+    }
+  } else {
+    // BOOM: chrome fills in
+    boltGlow(.85 * Math.exp(-d * 2.5) + .1, 40);
+    // shockwave
+    if (d < .7) {
+      const p = eOutCubic(d / .7), R = 60 + p * 1100;
+      ctx.save(); ctx.globalCompositeOperation = "lighter";
+      ctx.strokeStyle = `rgba(${ELEC},${.55 * (1 - p)})`; ctx.lineWidth = 40 * (1 - p) + 2; ctx.filter = "blur(6px)";
+      ctx.beginPath(); ctx.arc(CX, by + bh * .48, R, 0, 7); ctx.stroke();
+      ctx.filter = "none"; ctx.strokeStyle = `rgba(255,255,255,${.7 * (1 - p)})`; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(CX, by + bh * .48, R * .97, 0, 7); ctx.stroke(); ctx.restore();
+    }
+    lctx.clearRect(0, 0, W, H);
+    lctx.drawImage(BOLT, bx, by, bw, bh);
+    const over = Math.exp(-d * 6);
+    if (over > .01) { lctx.save(); lctx.globalCompositeOperation = "source-atop"; lctx.fillStyle = `rgba(230,244,255,${over})`; lctx.fillRect(0, 0, W, H); lctx.restore(); }
+    // text rises from behind an electric line
+    const lineY = textY + 22;
+    const tl = 2.35, tr = 2.55;
+    const rise = eOutExpo(lin(t, tr, tr + .55));
+    if (t > tr) {
+      lctx.save(); lctx.beginPath(); lctx.rect(0, 0, W, lineY - 6); lctx.clip();
+      lctx.translate(0, (1 - rise) * (textCap + 40));
+      drawText(lctx, () => 1);
+      lctx.restore();
+    }
+    shine(lctx, lin(t, 3.35, 4.1));
+    ctx.drawImage(layer, 0, 0);
+    // the electric line under the name
+    const lp = eOutExpo(lin(t, tl, tl + .35)), lfade = 1 - lin(t, 3.0, 3.45);
+    if (lp > 0 && lfade > 0) {
+      const half = 701 * S / 2 * lp, r = rnd(Math.floor(t * 30) * 5 + 2);
+      strokePts(ctx, jag(CX - half, lineY, CX + half, lineY, r, 10 * lfade, 5), .9 * lfade, .6);
+    }
+    const arcAmt = Math.exp(-d * 2.2);
+    if (arcAmt > .05) edgeArcs(ctx, t, Math.round(8 * arcAmt) + 1, arcAmt, 21);
+    if (t > 4.4 && t < 4.5) edgeArcs(ctx, t, 2, .7, 55);
+    sparks(ctx, t, B, CX, by + bh * .48, 90, 17, 1.1);
+  }
+  ctx.restore();
+  vignette();
+  const flash = d >= 0 ? (d < .05 ? .9 : .9 * Math.exp(-(d - .05) * 10)) : 0;
+  if (flash > .005) { ctx.fillStyle = `rgba(225,240,255,${flash})`; ctx.fillRect(0, 0, W, H); }
+}
+
+const VERS = { v1: [v1, V1], v2: [v2, V2] };
+window.ready = setup();
+window.renderFrame = (v, t) => { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.filter = "none"; VERS[v][0](t); return true; };
+window.durationOf = v => VERS[v][1].dur;
+</script>
+</body>
+</html>
